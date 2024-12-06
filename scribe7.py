@@ -40,7 +40,7 @@ class Decoder(torch.nn.Module):
             torch.nn.Linear(32, 128),
             torch.nn.ReLU(),
             torch.nn.Linear(128, 28 * 28),
-            torch.nn.Softmax()
+            torch.nn.Sigmoid()
         )
  
     def forward(self, x):
@@ -327,7 +327,7 @@ if __name__ == "__main__":
 
     model = Encoder(n).cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3, weight_decay = 1e-8)
-    encoder, _, _ = train_bottleneck(10, 5, model, Decoder, ANN, optimizer, loader, n, beta = .1)
+    encoder, _, _ = train_bottleneck(10, 5, model, Decoder, ANN, optimizer, loader, n, beta = .5)
     encoder.eval()
     
 

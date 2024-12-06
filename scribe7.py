@@ -287,43 +287,43 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(dataset = test, batch_size = 64,shuffle = False)
 
     # # Code for Training Normal AE
-    # model = AE(n).cuda()
+    model = AE(n).cuda()
     loss_function = torch.nn.MSELoss()
-    # optimizer = torch.optim.Adam(model.parameters(), lr = 1e-2, weight_decay = 1e-8)
-    # images, model = train_ae(20, loss_function, loader, model, optimizer)
-    # model.eval()
+    optimizer = torch.optim.Adam(model.parameters(), lr = 1e-2, weight_decay = 1e-8)
+    images, model = train_ae(20, loss_function, loader, model, optimizer)
+    model.eval()
 
-    # pred = ANN(n).cuda()
-    # opt_pred = torch.optim.Adam(pred.parameters(),lr = 1e-2, weight_decay = 1e-8)
-    # mse = torch.nn.MSELoss()
-    # pred = train_predictor(25, model.encoder, pred, opt_pred, loader)
+    pred = ANN(n).cuda()
+    opt_pred = torch.optim.Adam(pred.parameters(),lr = 1e-2, weight_decay = 1e-8)
+    mse = torch.nn.MSELoss()
+    pred = train_predictor(25, model.encoder, pred, opt_pred, loader)
 
-    # acc = 0
-    # index = 0
-    # count = 0
-    # mse = 0
-    # #Evaluate AE
-    # for (image, label) in test_loader:
-    #     # Reshaping the image to (-1, 784)
-    #     image = image.reshape(-1, 28*28).cuda()
-    #     #label = image[:, 28*14+14]>= .5
-    #     label = label.long().cuda()
+    acc = 0
+    index = 0
+    count = 0
+    mse = 0
+    #Evaluate AE
+    for (image, label) in test_loader:
+        # Reshaping the image to (-1, 784)
+        image = image.reshape(-1, 28*28).cuda()
+        #label = image[:, 28*14+14]>= .5
+        label = label.long().cuda()
 
-    #     encoding = model.encoder(image)
-    #     reconstructed = model.decoder(encoding)
-    #     yhat = pred(encoding).argmax(dim=1)
-    #     acc += torch.sum(yhat == label)
-    #     mse += loss_function(reconstructed, image)
-    #     count += len(image)
+        encoding = model.encoder(image)
+        reconstructed = model.decoder(encoding)
+        yhat = pred(encoding).argmax(dim=1)
+        acc += torch.sum(yhat == label)
+        mse += loss_function(reconstructed, image)
+        count += len(image)
 
-    #     reconstructed = reconstructed.detach().cpu().numpy()
+        reconstructed = reconstructed.detach().cpu().numpy()
 
-    #     if index < 5:
-    #         save_image(image.cpu().numpy()[0], f"mnist_images/Original-{index}.png")
-    #         save_image(reconstructed[0], f"mnist_images/AE-{index}.png")
-    #     index += 1
-    # print("Accuracy", acc/count)
-    # print("MSE", mse/index)
+        if index < 5:
+            save_image(image.cpu().numpy()[0], f"mnist_images/Original-{index}.png")
+            save_image(reconstructed[0], f"mnist_images/AE-{index}.png")
+        index += 1
+    print("Accuracy", acc/count)
+    print("MSE", mse/index)
 
     model = Encoder(n).cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3, weight_decay = 1e-8)
@@ -338,8 +338,8 @@ if __name__ == "__main__":
     opt_pred = torch.optim.Adam(pred.parameters(),lr = 1e-2, weight_decay = 1e-8)
     mse = torch.nn.MSELoss()
 
-    pred = train_predictor(25, encoder, pred, opt_pred, loader)
-    dec = train_decoder(25, encoder, dec, opt_dec, loader)
+    pred = train_predictor(10, encoder, pred, opt_pred, loader)
+    dec = train_decoder(10, encoder, dec, opt_dec, loader)
 
     dec.eval()
     pred.eval()

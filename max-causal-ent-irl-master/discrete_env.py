@@ -14,7 +14,7 @@ def categorical_sample(prob_n, np_random):
     """
     prob_n = np.asarray(prob_n)
     csprob_n = np.cumsum(prob_n)
-    return (csprob_n > np_random.rand()).argmax()
+    return (csprob_n > np_random.random()).argmax()
 
 
 class DiscreteEnv(Env):
@@ -52,6 +52,7 @@ class DiscreteEnv(Env):
     def _reset(self):
         self.s = categorical_sample(self.isd, self.np_random)
         self.lastaction=None
+        #print(self.s)
         return self.s
 
     def _step(self, a):

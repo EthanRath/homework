@@ -45,7 +45,7 @@ class MDP(object):
         return T
 
     def reset(self):
-        self.s = 0
+        self.s = self.env._reset()
         return self.s
 
     def step(self, a, s=None):

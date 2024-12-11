@@ -1,18 +1,15 @@
 import numpy as np 
-from frozen_lake import *
+from frozen_lake import FrozenLakeEnv, EthanCommute, cautious_ethan, don_care_ethan, ethan_belief
 from mdps import MDP, MDPOneTimeR
 from traj_tools import generate_trajectories, compute_s_a_visitations
-from value_iter_and_policy import vi_boltzmann, torch_boltzmann, vi_rational, qi_boltzmann
+from value_iter_and_policy import vi_boltzmann, vi_rational, qi_boltzmann, opt_boltzmann
 from occupancy_measure import compute_D
 from matplotlib import pyplot as plt
 
 import torch
 
-import warnings
-warnings.filterwarnings("ignore")
-
 def max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma=1, h=None, 
-                       temperature=1, epochs=1, learning_rate=0.2, theta=None, q_opt = None, v_opt = None, r = None):
+                       temperature=1, epochs=1, learning_rate=0.2, theta=None, q_opt = None, v_opt = None):
     '''
     Finds theta, a reward parametrization vector (r[s] = features[s]'.*theta) 
     that maximizes the log likelihood of the given expert trajectories, 
@@ -59,7 +56,7 @@ def max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma=1, h=None,
     # of a trajectory starting in state s from the expert trajectories.
     sa_visit_count, P_0 = compute_s_a_visitations(mdp, gamma, trajectories)
     sa_visit_count = torch.tensor(sa_visit_count)
-    #print("optimal", -torch.mean(sa_visit_count * (q_opt - v_opt)))
+    print("optimal", -torch.mean(sa_visit_count * (q_opt - v_opt)))
     
     # Mean state visitation count of expert trajectories
     # mean_s_visit_count[s] = ( \sum_{i,t} 1_{traj_s_{i,t} = s}) / num_traj
@@ -69,12 +66,10 @@ def max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma=1, h=None,
     
     if theta is None:
         #theta = np.eye(513)*513
-        theta = np.array([[.5, .5], [.5, .5]])
-        #theta = np.random.rand(feature_matrix.shape[1], feature_matrix.shape[0])
+        theta = np.random.rand(feature_matrix.shape[1], feature_matrix.shape[0])
         
     q_opt = torch.tensor(q_opt).double()
     v_opt = torch.tensor(v_opt).double()
-    r = torch.tensor(r).double()
     theta = torch.tensor(theta, requires_grad=True)
     feature_matrix = torch.tensor(feature_matrix).double()
     optim = torch.optim.Adam([theta], learning_rate)
@@ -82,35 +77,29 @@ def max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma=1, h=None,
     losses = []
     for i in range(epochs):
         belief = torch.matmul(feature_matrix, theta)
-        
-        #belief /= np.sum(belief, axis = 0)
-        belief = torch.nn.functional.softmax(belief, dim=1)
+        belief = torch.nn.functional.softmax(belief/.5, dim=1)
         #belief = torch.nn.functional.normalize(belief, 1, 1)
         #belief /= torch.sum(belief, dim = 1)
         
-        #V = torch.matmul(belief, v_opt)
-        #Q = torch.matmul(belief, q_opt)
+        V = torch.matmul(belief, v_opt)
+        Q = torch.matmul(belief, q_opt)
         
         
         
         #print(r.shape)
         # Compute the Boltzmann rational policy \pi_{s,a} = \exp(Q_{s,a} - V_s) 
         #V,Q,policy = opt_boltzmann(mdp, gamma, r, q_opt, v_opt, h, temperature)
-        V, Q, policy = torch_boltzmann(mdp, gamma, torch.matmul(belief, r), h, temperature)
+        #V, Q, policy = vi_boltzmann(mdp, gamma, r, h, temperature)
         
         # IRL log likelihood term: 
         # L = 0; for all traj: for all (s, a) in traj: L += Q[s,a] - V[s]
         L = -torch.sum(sa_visit_count * (Q - V))
-        
-        #policy = torch.nn.functional.softmax(torch.tensor(Q - V)/temperature).numpy()
-        
         optim.zero_grad()
         L.backward()
         optim.step()
         
         # The expected #times policy π visits state s in a given #timesteps.
         #D = compute_D(mdp, gamma, policy, P_0, t_max=trajectories.shape[1])    
-        
         #print(D.shape)    
 
         # IRL log likelihood gradient w.r.t rewardparameters. 
@@ -119,9 +108,6 @@ def max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma=1, h=None,
         # Negate to get the gradient of neg log likelihood, 
         # which is then minimized with GD.
         #dL_dtheta = -(mean_f_count - np.dot(feature_matrix.T, D))
-        #dL_dtheta = -dL_dtheta*np.eye(2)
-        #for row in dL_dtheta:
-        #    row = 0
 
         # Gradient descent
         #theta = theta - learning_rate * dL_dtheta
@@ -131,7 +117,6 @@ def max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma=1, h=None,
                   ', average per traj step: {}'.format(
                   L/(trajectories.shape[0] * trajectories.shape[1])), end = "\r")
             losses.append(-L.item())
-    print()
     return theta, losses, V, Q
 
 
@@ -178,26 +163,85 @@ def main(t_expert=1e-2,
     '''
     np.random.seed(0)
     #mdp = MDPOneTimeR(FrozenLakeEnv(is_slippery=False))  
-    task = BinGame()
-    r_expert = np.array([1,0])
-    #r_expert = task.rmat  
+    task = EthanCommute()
+    r_expert = task.rmat  
     mdp = MDP(task)
     #print(mdp.T.shape)
 
     # Features
     feature_matrix = np.eye(mdp.nS)
-
-    belief = np.array([[.8, .2], [.2, .8]])
-    print(belief)
+    #feature_matrix = np.array(task.states)
+    #for row in feature_matrix:
+    #    if row[0] == 1:
+    #        row[6:] = 0
+    #print("fm", feature_matrix)
+    #print(feature_matrix.shape)
+    
+    # Add dummy feature to show that features work
+    if False:
+        feature_matrix = np.concatenate((feature_matrix, np.ones((mdp.nS,1))), 
+                                        axis=1)
+    
+    # The true reward weights and the reward
+    #theta_expert = np.zeros(feature_matrix.shape[1])
+    #theta_expert[24] = 1
+    #r_expert = np.dot(feature_matrix, theta_expert)
     
     # Compute the Boltzmann rational expert policy from the given true reward.
     if t_expert>0:
-        V, Q, policy_expert = vi_boltzmann(mdp, gamma, np.matmul(belief, r_expert), h, t_expert)
+        V, Q, policy_expert = qi_boltzmann(mdp, gamma, r_expert, h, t_expert)
     if t_expert==0:
         V, Q, policy_expert = vi_rational(mdp, gamma, r_expert, h)
-    print(policy_expert)
-    print(Q)
-    print(V)
+        
+    trajectories = generate_trajectories(mdp, policy_expert, traj_len, n_traj)
+    print(compute_s_a_visitations(mdp, gamma, trajectories)[0])
+    #print(Q-V)
+    #print(policy_expert)
+    #print(policy_expert)
+    
+    belief = ethan_belief(task)
+    
+    counts = {"clear": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}
+              , "cloudy": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}
+              , "raining": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}
+              , "windy": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}}
+    
+    # ts = task.text_states
+    # for i in range(len(ts)):
+    #     for j in range(len(ts)):
+    #         if "done" in ts[i] or "done" in ts[j]: continue
+    #         if "home" in ts[i]:
+    #             counts[ts[i][1]][ts[j][2]] += belief[i][j].item()
+    #             counts[ts[i][1]][ts[j][3]] += belief[i][j].item()
+    #         elif "work" in ts[i]:
+    #             counts[ts[i][2]][ts[j][3]] += belief[i][j].item()
+    # print(counts)
+    
+    # for key in counts.keys():
+    #     total = 0
+    #     for keys in counts[key].keys():
+    #         total += counts[key][keys]
+    #     for keys in counts[key].keys():
+    #         counts[key][keys] /= total
+    #     print(key, counts[key])
+    
+    #print(belief)
+    V_pol = np.matmul(belief, V)
+    Q_pol = np.matmul(belief, Q)
+    
+    #print((Q_pol - V_pol) - (Q-V))
+    #expt = lambda x: np.exp(x/t_expert)
+    policy_expert = torch.nn.functional.softmax(torch.tensor(Q_pol - V_pol)/t_expert).numpy()
+    #policy_expert = expt(V_pol - Q_pol)
+    # for i in range(len(task.text_states)):
+    #     print(task.text_states[i], policy_expert[i])
+    
+    #policy_expert = don_care_ethan(task)
+    #policy_expert = torch.nn.functional.softmax(torch.tensor(policy_expert)/t_expert)
+    #policy_expert = policy_expert.numpy()
+    #print(policy_expert)
+    
+    
         
     # Generate expert trajectories using the given expert policy.
     trajectories = generate_trajectories(mdp, policy_expert, traj_len, n_traj)
@@ -206,25 +250,74 @@ def main(t_expert=1e-2,
     # Compute and print the stats of the generated expert trajectories.
     sa_visit_count, _ = compute_s_a_visitations(mdp, gamma, trajectories)
     print(sa_visit_count)
-            
-    
-    log_likelihood = np.sum(sa_visit_count * (Q - V))
+    log_likelihood = np.sum(sa_visit_count * (Q_pol - V_pol).numpy())
     
     print('Generated {} traj of length {}'.format(n_traj, traj_len))
     print('Log likelihood of all traj under the policy generated ', 
           'from the true reward: {}, \n average per traj step: {}'.format(
            log_likelihood, log_likelihood / (n_traj * traj_len)))
+    #print('Average return per expert trajectory: {} \n'.format(
+    #        np.sum(np.sum(sa_visit_count, axis=1)*( np.sum(policy_expert*Q, axis = 1) )) / n_traj))
+
+    # Find a reward vector that maximizes the log likelihood of the generated 
+    # expert trajectories.
+    
+    print(Q_pol)
     
     theta, losses, V, Q = max_causal_ent_irl(mdp, feature_matrix, trajectories, gamma, h, 
-                               t_irl, epochs, learning_rate, q_opt = Q, v_opt = V, r = r_expert)
-    print(Q)
-    print(V)
+                               t_irl, epochs, learning_rate, q_opt = Q, v_opt = V)
     print('Final reward weights: ', theta)
-    probs = torch.nn.functional.softmax( torch.matmul(torch.tensor(feature_matrix), theta),dim=1 )#.argmax(dim=1)
-    print("Predicted Beliefs \n", (probs))
+    feature_matrix = torch.tensor(feature_matrix).double()
+    probs = torch.nn.functional.softmax( torch.matmul(feature_matrix, theta) )#.argmax(dim=1)
+    
+    
+    for i in range(len(task.text_states)):
+        for j in range(len(task.text_states)):
+            if task.text_states[i][0] != task.text_states[j][0]:
+                probs[i,j] = 0
+    
+    vals = probs.argmax(dim = 1)
+    
+    with torch.no_grad():
+        temperature = t_irl
+        expt = lambda x: torch.exp(x/temperature)
+        policy = expt(Q - V).numpy()
+    
+    counts = {"clear": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}
+              , "cloudy": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}
+              , "raining": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}
+              , "windy": {"clear": 0, "cloudy": 0, "raining": 0, "windy": 0}}
+    
+    ts = task.text_states
+    for i in range(len(ts)):
+        for j in range(len(ts)):
+            if "done" in ts[i] or "done" in ts[j]: continue
+            if "home" in ts[i]:
+                counts[ts[i][1]][ts[j][2]] += probs[i][j].item()
+                counts[ts[i][1]][ts[j][3]] += probs[i][j].item()
+            elif "work" in ts[i]:
+                counts[ts[i][2]][ts[j][3]] += probs[i][j].item()
+    print(counts)
+    
+    for key in counts.keys():
+        total = 0
+        for keys in counts[key].keys():
+            total += counts[key][keys]
+        for keys in counts[key].keys():
+            counts[key][keys] /= total
+        print(key, counts[key])
+        
+        
+    
+    
+    for i in range(len(task.text_states)):
+       print(task.text_states[i], task.text_states[vals[i]])
+    #for i in range(len(task.text_states)):
+    #    print(task.text_states[i], policy[i], policy_expert[i])
     
     plt.figure(dpi = 150)
     plt.plot(losses, label = "Predicted Reward")
+    #plt.plot([0, len(losses)], [-24.66787025854367, -24.66787025854367], label = "True Reward Function")
     plt.xlabel("Optimization Iterations")
     plt.ylabel("Total Log Likelihood")
     plt.legend()
@@ -232,4 +325,4 @@ def main(t_expert=1e-2,
     plt.savefig("maxcent.png")
 
 if __name__ == "__main__":
-    main(traj_len=2, n_traj= 10000, epochs = 1000, learning_rate= .1, t_expert= 1, t_irl=1)
+    main(traj_len=3, n_traj= 100_000, epochs = 20_000, learning_rate= .01)

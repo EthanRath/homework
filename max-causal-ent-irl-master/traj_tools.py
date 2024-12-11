@@ -27,6 +27,7 @@ def generate_trajectories(mdp, policy, timesteps=20, num_traj=50):
     trajectories = np.zeros([num_traj, timesteps, 2]).astype(int)
     
     s = mdp.reset()
+    #print(s)
     for i in range(num_traj):
         for t in range(timesteps):
             action = np.random.choice(range(mdp.nA), p=policy[s, :])
